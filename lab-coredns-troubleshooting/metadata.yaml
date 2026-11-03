@@ -1,0 +1,14 @@
+id: lab-coredns-troubleshooting
+title: "Troubleshooting CoreDNS: Critical Cluster-wide DNS Resolution Failure"
+domain: "Troubleshooting"
+cka_weight: "30%"
+difficulty: "Hard"
+target_namespace: "kube-system"
+context: "default"
+estimated_time_minutes: 15
+skills_tested:
+  - CoreDNSTroubleshooting
+  - CorefileSyntaxDebugging
+  - ServiceSelectorMatching
+  - ServiceEndpointsValidation
+  - ClusterDNSResolutionVerification

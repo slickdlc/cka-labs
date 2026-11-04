@@ -1,0 +1,13 @@
+id: cka-lab-netpol-restrict-backend
+title: "Network Traffic Restriction with NetworkPolicy"
+domain: "Services and Networking"
+cka_weight: "20%"
+difficulty: "Medium"
+target_namespace: "ecommerce"
+context: "default"
+estimated_time_minutes: 8
+skills_tested:
+  - NetworkPolicy
+  - PodSelector
+  - Ingress Rules
+  - Port Filtering

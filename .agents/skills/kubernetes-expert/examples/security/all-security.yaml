@@ -1,0 +1,308 @@
+# Kubernetes Security Examples
+# RBAC, Pod Security, SecurityContexts, AppArmor, Seccomp
+
+---
+# ============================================
+# 1. RBAC — Role (namespace-scoped permissions)
+# ============================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-reader
+  namespace: development
+rules:
+- apiGroups: [""]              # Core API group
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
+
+---
+# ============================================
+# 2. RBAC — RoleBinding
+# ============================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: read-pods
+  namespace: development
+subjects:
+- kind: User
+  name: jane
+  apiGroup: rbac.authorization.k8s.io
+- kind: ServiceAccount
+  name: app-sa
+  namespace: development
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ============================================
+# 3. RBAC — ClusterRole (cluster-wide)
+# ============================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-reader
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+
+---
+# ============================================
+# 4. RBAC — ClusterRoleBinding
+# ============================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: read-nodes
+subjects:
+- kind: Group
+  name: devops-team
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: node-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ============================================
+# 5. ServiceAccount (with limited permissions)
+# ============================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-sa
+  namespace: development
+automountServiceAccountToken: false  # Security best practice
+
+---
+# ============================================
+# 6. Pod with FULL Security Context (CKS exam pattern)
+# ============================================
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-pod
+  namespace: development
+spec:
+  serviceAccountName: app-sa
+  automountServiceAccountToken: false
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 3000
+    fsGroup: 2000
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: app
+    image: nginx:1.27-alpine
+    ports:
+    - containerPort: 8080
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+        add: ["NET_BIND_SERVICE"]  # Only if needed
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+    - name: cache
+      mountPath: /var/cache/nginx
+    - name: run
+      mountPath: /var/run
+  volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: cache
+    emptyDir: {}
+  - name: run
+    emptyDir: {}
+
+---
+# ============================================
+# 7. Pod Security Standards — Namespace Labels
+# ============================================
+# Apply these labels to enforce Pod Security Standards at namespace level
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: restricted-ns
+  labels:
+    # Enforce: reject pods that violate the policy
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    # Warn: allow but show warnings
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    # Audit: log violations
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+
+---
+# ============================================
+# 8. Seccomp Profile — Custom (localhost)
+# ============================================
+# File must exist at: /var/lib/kubelet/seccomp/profiles/custom-profile.json
+# Example custom profile content:
+# {
+#   "defaultAction": "SCMP_ACT_ERRNO",
+#   "architectures": ["SCMP_ARCH_X86_64"],
+#   "syscalls": [
+#     { "names": ["read","write","exit","exit_group","open","close",
+#                  "stat","fstat","lstat","mmap","mprotect","munmap",
+#                  "brk","rt_sigaction","rt_sigprocmask","ioctl",
+#                  "access","pipe","select","sched_yield","mremap",
+#                  "clone","fork","execve","arch_prctl","set_tid_address",
+#                  "set_robust_list","futex","nanosleep","getpid","getuid"],
+#       "action": "SCMP_ACT_ALLOW"
+#     }
+#   ]
+# }
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: seccomp-pod
+spec:
+  securityContext:
+    seccompProfile:
+      type: Localhost
+      localhostProfile: profiles/custom-profile.json
+  containers:
+  - name: app
+    image: nginx:1.27-alpine
+    securityContext:
+      allowPrivilegeEscalation: false
+
+---
+# ============================================
+# 9. AppArmor Profile Pod
+# ============================================
+# AppArmor profile must be loaded on the node first:
+#   sudo apparmor_parser -q /etc/apparmor.d/k8s-deny-write
+#
+# Example AppArmor profile (/etc/apparmor.d/k8s-deny-write):
+# #include <tunables/global>
+# profile k8s-deny-write flags=(attach_disconnected) {
+#   #include <abstractions/base>
+#   file,
+#   deny /tmp/** w,
+#   deny /etc/** w,
+# }
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: apparmor-pod
+  annotations:
+    # Apply AppArmor profile to container
+    container.apparmor.security.beta.kubernetes.io/app: localhost/k8s-deny-write
+spec:
+  containers:
+  - name: app
+    image: nginx:1.27-alpine
+    securityContext:
+      allowPrivilegeEscalation: false
+
+---
+# ============================================
+# 10. RuntimeClass — gVisor sandbox
+# ============================================
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc  # Must match containerd/CRI-O config
+
+---
+# Pod using gVisor sandbox
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sandboxed-pod
+spec:
+  runtimeClassName: gvisor
+  containers:
+  - name: app
+    image: nginx:1.27-alpine
+
+---
+# ============================================
+# 11. Secrets Encryption at Rest Configuration
+# ============================================
+# File: /etc/kubernetes/enc/encryption-config.yaml
+# Must be referenced in kube-apiserver manifest:
+#   --encryption-provider-config=/etc/kubernetes/enc/encryption-config.yaml
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+- resources:
+  - secrets
+  providers:
+  - aescbc:
+      keys:
+      - name: key1
+        # Generate: head -c 32 /dev/urandom | base64
+        secret: <base64-encoded-32-byte-key>
+  - identity: {}  # Fallback: read unencrypted secrets
+
+---
+# ============================================
+# 12. Audit Policy
+# ============================================
+# File: /etc/kubernetes/audit/audit-policy.yaml
+# Referenced in kube-apiserver:
+#   --audit-policy-file=/etc/kubernetes/audit/audit-policy.yaml
+#   --audit-log-path=/var/log/kubernetes/audit.log
+#   --audit-log-maxage=30
+#   --audit-log-maxbackup=10
+#   --audit-log-maxsize=100
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+# Don't log requests to certain non-resource URL paths
+- level: None
+  nonResourceURLs:
+  - /healthz*
+  - /readyz*
+  - /livez*
+
+# Don't log watch requests
+- level: None
+  verbs: ["watch"]
+
+# Log Secret access at Metadata level (don't log secret data!)
+- level: Metadata
+  resources:
+  - group: ""
+    resources: ["secrets"]
+
+# Log pod changes at RequestResponse level
+- level: RequestResponse
+  resources:
+  - group: ""
+    resources: ["pods"]
+  verbs: ["create", "update", "patch", "delete"]
+
+# Log everything else at Metadata
+- level: Metadata
+  omitStages:
+  - RequestReceived
+

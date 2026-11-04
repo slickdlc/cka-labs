@@ -1,0 +1,218 @@
+# Kubernetes Storage Examples
+# PersistentVolumes, PVCs, StorageClasses, Dynamic Provisioning
+
+---
+# ============================================
+# 1. PersistentVolume — hostPath (single node, dev/testing)
+# ============================================
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-hostpath
+  labels:
+    type: local
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+  - ReadWriteOnce           # RWO: single node read-write
+  persistentVolumeReclaimPolicy: Retain  # Keep data after PVC deletion
+  hostPath:
+    path: /data/pv-hostpath
+    type: DirectoryOrCreate
+
+---
+# ============================================
+# 2. PersistentVolume — NFS (multi-node)
+# ============================================
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-nfs
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+  - ReadWriteMany            # RWX: multiple nodes read-write
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    server: 192.168.1.100
+    path: /exports/data
+
+---
+# ============================================
+# 3. PersistentVolumeClaim
+# ============================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-data-pvc
+  namespace: default
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard    # Empty string "" = manual binding
+  # Optional: select specific PV
+  # selector:
+  #   matchLabels:
+  #     type: local
+
+---
+# ============================================
+# 4. Pod using PVC
+# ============================================
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-with-pvc
+spec:
+  containers:
+  - name: app
+    image: nginx:1.27-alpine
+    volumeMounts:
+    - name: data
+      mountPath: /usr/share/nginx/html
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: app-data-pvc
+
+---
+# ============================================
+# 5. StorageClass — Dynamic Provisioning
+# ============================================
+# GKE / GCE PD
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-ssd
+provisioner: pd.csi.storage.gke.io
+parameters:
+  type: pd-ssd
+reclaimPolicy: Delete           # Auto-delete when PVC is deleted
+allowVolumeExpansion: true      # Allow PVC resize
+volumeBindingMode: WaitForFirstConsumer  # Bind when pod is scheduled
+
+---
+# AWS EBS StorageClass
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: aws-gp3
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  iops: "3000"
+  throughput: "125"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+
+---
+# ============================================
+# 6. PVC with Dynamic StorageClass
+# ============================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fast-storage
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: fast-ssd    # References StorageClass above
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# ============================================
+# 7. Volume Types Quick Reference
+# ============================================
+
+# emptyDir — Ephemeral, deleted when pod dies
+apiVersion: v1
+kind: Pod
+metadata:
+  name: emptydir-pod
+spec:
+  containers:
+  - name: app
+    image: nginx:1.27-alpine
+    volumeMounts:
+    - name: cache
+      mountPath: /cache
+    - name: memory-volume
+      mountPath: /dev/shm
+  volumes:
+  - name: cache
+    emptyDir: {}
+  - name: memory-volume
+    emptyDir:
+      medium: Memory           # tmpfs — backed by RAM
+      sizeLimit: 128Mi
+
+---
+# hostPath — Direct node filesystem access (use sparingly!)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hostpath-pod
+spec:
+  containers:
+  - name: app
+    image: nginx:1.27-alpine
+    volumeMounts:
+    - name: host-data
+      mountPath: /host-data
+      readOnly: true
+  volumes:
+  - name: host-data
+    hostPath:
+      path: /var/log
+      type: Directory          # Must exist
+
+---
+# ConfigMap as Volume
+apiVersion: v1
+kind: Pod
+metadata:
+  name: configmap-volume-pod
+spec:
+  containers:
+  - name: app
+    image: nginx:1.27-alpine
+    volumeMounts:
+    - name: config
+      mountPath: /etc/nginx/conf.d
+      readOnly: true
+  volumes:
+  - name: config
+    configMap:
+      name: nginx-config
+      items:                    # Optional: select specific keys
+      - key: nginx.conf
+        path: default.conf
+
+---
+# Secret as Volume
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secret-volume-pod
+spec:
+  containers:
+  - name: app
+    image: nginx:1.27-alpine
+    volumeMounts:
+    - name: certs
+      mountPath: /etc/ssl/certs
+      readOnly: true
+  volumes:
+  - name: certs
+    secret:
+      secretName: tls-secret
+      defaultMode: 0400         # Restrictive permissions
+

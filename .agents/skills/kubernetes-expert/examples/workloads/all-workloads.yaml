@@ -1,0 +1,363 @@
+# Kubernetes Workload Examples
+# Comprehensive examples for CKA/CKAD exam preparation
+
+---
+# ============================================
+# 1. POD — Basic pod with best practices
+# ============================================
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-pod
+  labels:
+    app: nginx
+    env: dev
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.27-alpine
+    ports:
+    - containerPort: 80
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+    readinessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    livenessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: 15
+      periodSeconds: 20
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 101
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+
+---
+# ============================================
+# 2. POD — Multi-container (Sidecar Pattern)
+# ============================================
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-container-pod
+  labels:
+    app: web-with-sidecar
+spec:
+  # Init container runs first (before main containers)
+  initContainers:
+  - name: init-config
+    image: busybox:1.36
+    command: ['sh', '-c', 'echo "initialized" > /shared/status']
+    volumeMounts:
+    - name: shared-data
+      mountPath: /shared
+
+  containers:
+  # Main application container
+  - name: app
+    image: nginx:1.27-alpine
+    ports:
+    - containerPort: 80
+    volumeMounts:
+    - name: shared-data
+      mountPath: /usr/share/nginx/html
+    - name: log-volume
+      mountPath: /var/log/nginx
+
+  # Sidecar: Log shipper
+  - name: log-sidecar
+    image: busybox:1.36
+    command: ['sh', '-c', 'tail -f /var/log/nginx/access.log']
+    volumeMounts:
+    - name: log-volume
+      mountPath: /var/log/nginx
+      readOnly: true
+
+  volumes:
+  - name: shared-data
+    emptyDir: {}
+  - name: log-volume
+    emptyDir: {}
+
+---
+# ============================================
+# 3. DEPLOYMENT — Rolling update with strategy
+# ============================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  labels:
+    app: webapp
+spec:
+  replicas: 3
+  revisionHistoryLimit: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # Max pods above desired during update
+      maxUnavailable: 0    # Zero downtime
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+        version: v1
+    spec:
+      containers:
+      - name: webapp
+        image: nginx:1.27-alpine
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        env:
+        - name: APP_ENV
+          value: "production"
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: db_host
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: db_password
+
+---
+# ============================================
+# 4. STATEFULSET — Database with stable identity
+# ============================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres-headless  # Required: headless service name
+  replicas: 3
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16-alpine
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+  # VolumeClaimTemplate — each pod gets its own PVC
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+# Headless Service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+spec:
+  clusterIP: None  # Headless!
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+
+---
+# ============================================
+# 5. DAEMONSET — Node monitoring agent
+# ============================================
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-monitor
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: node-monitor
+  template:
+    metadata:
+      labels:
+        app: node-monitor
+    spec:
+      tolerations:
+      # Run on ALL nodes, including control plane
+      - key: node-role.kubernetes.io/control-plane
+        effect: NoSchedule
+      containers:
+      - name: monitor
+        image: prom/node-exporter:v1.7.0
+        ports:
+        - containerPort: 9100
+          hostPort: 9100
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+
+---
+# ============================================
+# 6. JOB — One-time task
+# ============================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backup-job
+spec:
+  backoffLimit: 3          # Max retries on failure
+  activeDeadlineSeconds: 600  # Timeout after 10 min
+  ttlSecondsAfterFinished: 3600  # Auto-cleanup after 1 hour
+  template:
+    spec:
+      restartPolicy: Never  # Jobs must use Never or OnFailure
+      containers:
+      - name: backup
+        image: alpine:3.19
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Starting backup at $(date)"
+          # Simulate backup work
+          sleep 30
+          echo "Backup complete at $(date)"
+
+---
+# ============================================
+# 7. CRONJOB — Scheduled recurring task
+# ============================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanup-cronjob
+spec:
+  schedule: "0 2 * * *"        # Every day at 2:00 AM
+  concurrencyPolicy: Forbid    # Don't run if previous still running
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  startingDeadlineSeconds: 200
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: cleanup
+            image: alpine:3.19
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Cleanup started at $(date)"
+              find /data -name "*.tmp" -mtime +7 -delete
+              echo "Cleanup finished"
+
+---
+# ============================================
+# 8. CONFIGMAP — Application configuration
+# ============================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  db_host: "postgres-headless.default.svc.cluster.local"
+  db_port: "5432"
+  log_level: "info"
+  # Multi-line config file
+  nginx.conf: |
+    server {
+        listen 80;
+        server_name _;
+        location / {
+            proxy_pass http://backend:8080;
+        }
+        location /health {
+            return 200 'OK';
+        }
+    }
+
+---
+# ============================================
+# 9. SECRET — Sensitive data
+# ============================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+type: Opaque
+data:
+  # Values must be base64-encoded
+  # echo -n 'mypassword' | base64
+  db_password: bXlwYXNzd29yZA==
+  api_key: c2VjcmV0LWFwaS1rZXk=
+stringData:
+  # stringData accepts plain text (auto-encoded)
+  connection_string: "postgresql://admin:mypassword@postgres:5432/mydb"
+

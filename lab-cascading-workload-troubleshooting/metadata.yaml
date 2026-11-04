@@ -1,0 +1,15 @@
+id: lab-cascading-workload-troubleshooting
+title: "Troubleshooting Multi-Tier Microservice Outage: Cascading Failures Across Pod Lifecycle, Probes, Services, and Network Policies"
+domain: "Troubleshooting"
+cka_weight: "30%"
+difficulty: "Expert"
+target_namespace: "ecommerce-prod"
+context: "default"
+estimated_time_minutes: 20
+skills_tested:
+  - PodSchedulingDiagnosis
+  - InitContainerTroubleshooting
+  - SecretKeyBindingResolution
+  - ReadinessProbeDebugging
+  - ServiceSelectorAndPortAlignment
+  - NetworkPolicyIngressEgressResolution

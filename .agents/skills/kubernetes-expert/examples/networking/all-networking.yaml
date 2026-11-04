@@ -1,0 +1,285 @@
+# Kubernetes Networking Examples
+# Services, Ingress, Gateway API, and NetworkPolicies
+
+---
+# ============================================
+# 1. ClusterIP Service (default, internal only)
+# ============================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+spec:
+  type: ClusterIP       # Default type
+  selector:
+    app: backend
+  ports:
+  - name: http
+    port: 80             # Service port (what clients connect to)
+    targetPort: 8080     # Pod port (where app listens)
+    protocol: TCP
+
+---
+# ============================================
+# 2. NodePort Service (external access via node IP)
+# ============================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-nodeport
+spec:
+  type: NodePort
+  selector:
+    app: frontend
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 30080      # Range: 30000-32767 (optional, auto-assigned if omitted)
+
+---
+# ============================================
+# 3. LoadBalancer Service (cloud provider LB)
+# ============================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-lb
+  annotations:
+    # Cloud-specific annotations
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: LoadBalancer
+  selector:
+    app: frontend
+  ports:
+  - port: 443
+    targetPort: 8443
+  # Optional: restrict source IPs
+  loadBalancerSourceRanges:
+  - "10.0.0.0/8"
+  - "192.168.0.0/16"
+
+---
+# ============================================
+# 4. ExternalName Service (CNAME alias)
+# ============================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-db
+spec:
+  type: ExternalName
+  externalName: mydb.example.com  # DNS CNAME, no proxying
+
+---
+# ============================================
+# 5. Headless Service (for StatefulSets)
+# ============================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-headless
+spec:
+  clusterIP: None        # HEADLESS — no virtual IP
+  selector:
+    app: database
+  ports:
+  - port: 5432
+
+---
+# ============================================
+# 6. Ingress Resource (HTTP routing)
+# ============================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx  # Required in modern K8s
+  tls:
+  - hosts:
+    - app.example.com
+    secretName: app-tls-secret  # TLS certificate secret
+  rules:
+  - host: app.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-service
+            port:
+              number: 80
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: backend-service
+            port:
+              number: 8080
+
+---
+# ============================================
+# 7. Gateway API — HTTPRoute (modern Ingress replacement)
+# ============================================
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: main-gateway
+spec:
+  gatewayClassName: istio  # or nginx, envoy, etc.
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+  - name: https
+    port: 443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: app-tls-secret
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app-routes
+spec:
+  parentRefs:
+  - name: main-gateway
+  hostnames:
+  - "app.example.com"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /api
+    backendRefs:
+    - name: backend-service
+      port: 8080
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: frontend-service
+      port: 80
+
+---
+# ============================================
+# 8. NetworkPolicy — Default Deny All
+# ============================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+# ============================================
+# 9. NetworkPolicy — Allow DNS (essential with deny-all)
+# ============================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+# ============================================
+# 10. NetworkPolicy — Allow frontend→backend
+# ============================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-backend
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: frontend
+    ports:
+    - protocol: TCP
+      port: 8080
+
+---
+# ============================================
+# 11. NetworkPolicy — Allow from specific namespace
+# ============================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+
+---
+# ============================================
+# 12. NetworkPolicy — Egress to external CIDR
+# ============================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-api
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: payment
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 203.0.113.0/24
+    ports:
+    - protocol: TCP
+      port: 443
+

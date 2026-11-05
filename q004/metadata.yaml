@@ -1,0 +1,14 @@
+id: lab-argocd-helm-install
+title: "CKA 2025: Argo CD Deployment via Helm with CRD Management"
+domain: "Cluster Architecture, Installation & Configuration"
+cka_weight: "25%"
+difficulty: "Medium"
+target_namespace: "argocd"
+context: "default"
+estimated_time_minutes: 8
+skills_tested:
+  - HelmRepositoryManagement
+  - HelmTemplating
+  - HelmChartConfiguration
+  - HelmReleaseInstallation
+  - CRDManagement

@@ -1,0 +1,14 @@
+id: lab-mariadb-pv-reuse
+title: "CKA 2025: Re-establishing Workload with Persistent Volume Reuse"
+domain: "Storage"
+cka_weight: "10%"
+difficulty: "Medium"
+target_namespace: "mariadb"
+context: "default"
+estimated_time_minutes: 8
+skills_tested:
+  - PersistentVolumeReclaim
+  - PersistentVolumeClaimCreation
+  - VolumeBinding
+  - DeploymentManifestConfiguration
+  - WorkloadDataPreservation

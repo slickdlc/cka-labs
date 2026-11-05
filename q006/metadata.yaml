@@ -1,0 +1,15 @@
+id: q006-wordpress-resource-requests-limits
+title: "Workloads & Scheduling: Adjust WordPress Pod Resource Requests and Limits for Cluster Stability"
+domain: "Workloads & Scheduling"
+cka_weight: "15%"
+difficulty: "Medium"
+target_namespace: "default"
+context: "default"
+estimated_time_minutes: 8
+skills_tested:
+  - PodResourceRequestsAndLimits
+  - NodeAllocatableResourceInspection
+  - InitContainerResourceConfiguration
+  - DeploymentScalingAndRollout
+  - FairShareCapacityPlanning
+

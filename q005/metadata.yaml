@@ -1,0 +1,14 @@
+id: q005-wordpress-sidecar-logging
+title: "Workloads & Scheduling: Multi-Container Sidecar Logging Pattern for WordPress Deployment"
+domain: "Workloads & Scheduling"
+cka_weight: "15%"
+difficulty: "Medium"
+target_namespace: "default"
+context: "default"
+estimated_time_minutes: 8
+skills_tested:
+  - MultiContainerPodPattern
+  - SidecarContainerConfiguration
+  - EmptyDirVolumeSharing
+  - DeploymentSpecModification
+  - ContainerCommandAndArgs
